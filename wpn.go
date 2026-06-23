@@ -171,29 +171,30 @@ func (wp *WorkerPool) worker(id int) {
 			for i := 1; i <= defaultRetryAttempt; i++ {
 				attempts = i
 				lastErr = job.Exec(job.Context)
+
+				finish := time.Now()
+				res := &Result{
+					JobID:        job.ID,
+					Output:       OutputSuccessful,
+					StartedAt:    start,
+					FinishedAt:   finish,
+					TimeConsumed: finish.Sub(start),
+					Attempts:     attempts,
+					WorkerID:     id,
+					Error:        nil,
+				}
+
+				if lastErr != nil {
+					res.Output = OutputFail
+					res.Error = lastErr
+				}
+
+				wp.resultChan <- res
+
 				if lastErr == nil {
 					break
 				}
 			}
-
-			finish := time.Now()
-			res := &Result{
-				JobID:        job.ID,
-				Output:       OutputSuccessful,
-				StartedAt:    start,
-				FinishedAt:   finish,
-				TimeConsumed: finish.Sub(start),
-				Attempts:     attempts,
-				WorkerID:     id,
-				Error:        nil,
-			}
-
-			if lastErr != nil {
-				res.Output = OutputFail
-				res.Error = lastErr
-			}
-
-			wp.resultChan <- res
 		}
 	}
 }
