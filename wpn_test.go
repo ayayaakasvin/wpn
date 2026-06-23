@@ -28,6 +28,17 @@ func TestWorkerPoolSubmitNilJobFunc(t *testing.T) {
 	}
 }
 
+func TestWorkerPoolSubmitBeforeStart(t *testing.T) {
+	wp, err := wpn.NewWorkerPool(1)
+	if err != nil {
+		t.Fatalf("unexpected NewWorkerPool error: %v", err)
+	}
+
+	if err := wp.Submit(func(ctx context.Context) error { return nil }, context.Background()); err == nil {
+		t.Fatal("expected error when submitting before Start")
+	}
+}
+
 func TestWorkerPoolExecSuccess(t *testing.T) {
 	wp, err := wpn.NewWorkerPool(2)
 	if err != nil {

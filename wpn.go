@@ -22,6 +22,10 @@ type WorkerPool struct {
 	resultChan chan *Result
 
 	wg        *sync.WaitGroup
+	submitWg  sync.WaitGroup
+	mu        sync.Mutex
+	started   bool
+	shutdown  bool
 	closeOnce sync.Once
 
 	workerCount int
@@ -32,7 +36,10 @@ func NewWorkerPool(workerCount int) (*WorkerPool, error) {
 		return nil, fmt.Errorf("worker count is less than 1: %d", workerCount)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	wp := &WorkerPool{
+		ctx:        ctx,
+		cancel:     cancel,
 		jobsChan:   make(chan *Job, 64),
 		resultChan: make(chan *Result, 128),
 
@@ -43,34 +50,33 @@ func NewWorkerPool(workerCount int) (*WorkerPool, error) {
 	return wp, nil
 }
 
-func (wp *WorkerPool) Submit(jfn JobFunc, ctx context.Context) (err error) {
+func (wp *WorkerPool) Submit(jfn JobFunc, ctx context.Context) error {
 	if jfn == nil {
 		return fmt.Errorf("job function is nil")
 	}
+
+	if ctx == nil {
+		return fmt.Errorf("ctx is nil")
+	}
+
+	wp.mu.Lock()
+	if !wp.started {
+		wp.mu.Unlock()
+		return fmt.Errorf("worker pool has not been started")
+	}
+	if wp.shutdown {
+		wp.mu.Unlock()
+		return fmt.Errorf("worker pool has been shut down")
+	}
+	wp.submitWg.Add(1)
+	wp.mu.Unlock()
+	defer wp.submitWg.Done()
 
 	job := &Job{
 		ID:      ulid.Make().String(),
 		Context: ctx,
 		Exec:    jfn,
 	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			switch v := r.(type) {
-			case error:
-				if v.Error() == "send on closed channel" {
-					err = fmt.Errorf("worker pool has been shut down")
-					return
-				}
-			case string:
-				if v == "send on closed channel" {
-					err = fmt.Errorf("worker pool has been shut down")
-					return
-				}
-			}
-			panic(r)
-		}
-	}()
 
 	select {
 	case wp.jobsChan <- job:
@@ -90,10 +96,18 @@ func (wp *WorkerPool) Start(parent context.Context) error {
 	if wp.workerCount < 1 {
 		return fmt.Errorf("worker count is less than 1: %d", wp.workerCount)
 	}
-	ctx, cancel := context.WithCancel(parent)
 
+	wp.mu.Lock()
+	defer wp.mu.Unlock()
+
+	if wp.started {
+		return fmt.Errorf("worker pool already started")
+	}
+
+	ctx, cancel := context.WithCancel(parent)
 	wp.ctx = ctx
 	wp.cancel = cancel
+	wp.started = true
 
 	for i := 0; i < wp.workerCount; i++ {
 		wp.wg.Add(1)
@@ -104,13 +118,37 @@ func (wp *WorkerPool) Start(parent context.Context) error {
 }
 
 func (wp *WorkerPool) Shutdown(ctx context.Context) {
-	wp.cancel()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	// close job channel once, wait for workers to finish, then close results
+	wp.mu.Lock()
+	if !wp.started || wp.shutdown {
+		wp.mu.Unlock()
+		return
+	}
+	wp.shutdown = true
+	wp.mu.Unlock()
+
+	wp.submitWg.Wait()
+
 	wp.closeOnce.Do(func() {
 		close(wp.jobsChan)
 	})
-	wp.wg.Wait()
+
+	done := make(chan struct{})
+	go func() {
+		wp.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		wp.cancel()
+		<-done
+	}
+
 	close(wp.resultChan)
 }
 
@@ -127,32 +165,34 @@ func (wp *WorkerPool) worker(id int) {
 			}
 
 			start := time.Now()
-
-			res := &Result{
-				JobID:     job.ID,
-				Output:    OutputSuccessful,
-				StartedAt: start,
-				WorkerID:  id,
-				Error:     nil,
-			}
+			var lastErr error
+			attempts := 0
 
 			for i := 1; i <= defaultRetryAttempt; i++ {
-				err := job.Exec(job.Context)
-				res.Attempts = i
-
-				if err != nil {
-					res.Output = OutputFail
-					res.Error = err
-				} else {
-					res.Output = OutputSuccessful
-					res.Error = nil
+				attempts = i
+				lastErr = job.Exec(job.Context)
+				if lastErr == nil {
 					break
 				}
 			}
 
 			finish := time.Now()
-			res.FinishedAt = finish
-			res.TimeConsumed = finish.Sub(start)
+			res := &Result{
+				JobID:        job.ID,
+				Output:       OutputSuccessful,
+				StartedAt:    start,
+				FinishedAt:   finish,
+				TimeConsumed: finish.Sub(start),
+				Attempts:     attempts,
+				WorkerID:     id,
+				Error:        nil,
+			}
+
+			if lastErr != nil {
+				res.Output = OutputFail
+				res.Error = lastErr
+			}
+
 			wp.resultChan <- res
 		}
 	}
