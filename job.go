@@ -29,7 +29,7 @@ type Result struct {
 
 	// Output produced by the job (if any). Kept as int for backward
 	// compatibility with existing code; change as needed.
-	Output int
+	Output Output
 
 	// Error, if the job failed.
 	Error error

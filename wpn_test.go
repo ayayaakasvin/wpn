@@ -3,6 +3,7 @@ package wpn_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
@@ -167,4 +168,17 @@ func TestOutputString(t *testing.T) {
 			t.Errorf("Output(%d).String() = %q, want %q", c.value, got, c.expected)
 		}
 	}
+}
+
+func TestSubmitter(t *testing.T) {
+	wp, err := wpn.NewWorkerPool(2)
+	if err != nil {
+		t.Fatalf("unexpected NewWorkerPool error: %v", err)
+	}
+
+	_ = wpn.Sumbitter(wp)
+}
+
+func TestCPUandMax(t *testing.T) {
+	t.Log(runtime.NumCPU())
 }
