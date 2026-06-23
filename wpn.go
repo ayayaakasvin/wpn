@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -29,6 +30,11 @@ type WorkerPool struct {
 	closeOnce sync.Once
 
 	workerCount int
+	busyWorkers atomic.Int64
+
+	processedJobs atomic.Int64
+	failedJobs    atomic.Int64
+	retriedJobs   atomic.Int64
 }
 
 func NewWorkerPool(workerCount int) (*WorkerPool, error) {
@@ -48,6 +54,24 @@ func NewWorkerPool(workerCount int) (*WorkerPool, error) {
 	}
 
 	return wp, nil
+}
+
+func (wp *WorkerPool) Stats() *Stats {
+	st := &Stats{
+		WorkerCount: wp.workerCount,
+		BusyWorkers: int(wp.busyWorkers.Load()),
+		QueueLength: len(wp.jobsChan),
+
+		ProcessedJobs: int(wp.processedJobs.Load()),
+		FailedJobs:    int(wp.failedJobs.Load()),
+		RetriedJobs:   int(wp.retriedJobs.Load()),
+	}
+
+	if total := st.ProcessedJobs + st.FailedJobs; total > 0 {
+		st.MissRate = (float64(st.FailedJobs) / float64(total)) * 100
+	}
+
+	return st
 }
 
 func (wp *WorkerPool) Submit(jfn JobFunc, ctx context.Context) error {
@@ -164,6 +188,9 @@ func (wp *WorkerPool) worker(id int) {
 				return
 			}
 
+			wp.busyWorkers.Add(1)
+			defer wp.busyWorkers.Add(-1)
+
 			start := time.Now()
 			var lastErr error
 			attempts := 0
@@ -172,29 +199,35 @@ func (wp *WorkerPool) worker(id int) {
 				attempts = i
 				lastErr = job.Exec(job.Context)
 
-				finish := time.Now()
-				res := &Result{
-					JobID:        job.ID,
-					Output:       OutputSuccessful,
-					StartedAt:    start,
-					FinishedAt:   finish,
-					TimeConsumed: finish.Sub(start),
-					Attempts:     attempts,
-					WorkerID:     id,
-					Error:        nil,
-				}
-
-				if lastErr != nil {
-					res.Output = OutputFail
-					res.Error = lastErr
-				}
-
-				wp.resultChan <- res
-
 				if lastErr == nil {
+					wp.processedJobs.Add(1)
 					break
 				}
+
+				if i < defaultRetryAttempt {
+					wp.retriedJobs.Add(1)
+				}
 			}
+
+			finish := time.Now()
+			res := &Result{
+				JobID:        job.ID,
+				Output:       OutputSuccessful,
+				StartedAt:    start,
+				FinishedAt:   finish,
+				TimeConsumed: finish.Sub(start),
+				Attempts:     attempts,
+				WorkerID:     id,
+				Error:        nil,
+			}
+
+			if lastErr != nil {
+				res.Output = OutputFail
+				res.Error = lastErr
+				wp.failedJobs.Add(1)
+			}
+
+			wp.resultChan <- res
 		}
 	}
 }

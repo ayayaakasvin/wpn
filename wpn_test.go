@@ -190,6 +190,39 @@ func TestSubmitter(t *testing.T) {
 	_ = wpn.Sumbitter(wp)
 }
 
+func TestWorkerPoolStats(t *testing.T) {
+	wp, err := wpn.NewWorkerPool(1)
+	if err != nil {
+		t.Fatalf("unexpected NewWorkerPool error: %v", err)
+	}
+
+	if err := wp.Start(context.Background()); err != nil {
+		t.Fatalf("unexpected Start error: %v", err)
+	}
+	defer wp.Shutdown(context.Background())
+
+	if err := wp.Submit(func(ctx context.Context) error { return nil }, context.Background()); err != nil {
+		t.Fatalf("unexpected Submit error: %v", err)
+	}
+
+	select {
+	case <-wp.Results():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for result")
+	}
+
+	stats := wp.Stats()
+	if stats.ProcessedJobs != 1 {
+		t.Fatalf("expected ProcessedJobs=1, got %d", stats.ProcessedJobs)
+	}
+	if stats.FailedJobs != 0 {
+		t.Fatalf("expected FailedJobs=0, got %d", stats.FailedJobs)
+	}
+	if stats.MissRate != 0 {
+		t.Fatalf("expected MissRate=0, got %f", stats.MissRate)
+	}
+}
+
 func TestCPUandMax(t *testing.T) {
 	t.Log(runtime.NumCPU())
 }
