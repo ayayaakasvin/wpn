@@ -23,17 +23,12 @@ type WorkerPool struct {
 	workerCount int
 }
 
-func NewWorkerPool(parent context.Context, workerCount int) (*WorkerPool, error) {
+func NewWorkerPool(workerCount int) (*WorkerPool, error) {
 	if workerCount < 1 {
 		return nil, fmt.Errorf("worker count is less than 1: %d", workerCount)
 	}
 
-	ctx, cancel := context.WithCancel(parent)
-
 	wp := &WorkerPool{
-		ctx:    ctx,
-		cancel: cancel,
-
 		jobsChan:   make(chan *Job, 64),
 		resultChan: make(chan *Result, 128),
 
@@ -87,10 +82,14 @@ func (wp *WorkerPool) Results() <-chan *Result {
 	return wp.resultChan
 }
 
-func (wp *WorkerPool) Start() error {
+func (wp *WorkerPool) Start(parent context.Context) error {
 	if wp.workerCount < 1 {
 		return fmt.Errorf("worker count is less than 1: %d", wp.workerCount)
 	}
+	ctx, cancel := context.WithCancel(parent)
+
+	wp.ctx = ctx
+	wp.cancel = cancel
 
 	for i := 0; i < wp.workerCount; i++ {
 		wp.wg.Add(1)

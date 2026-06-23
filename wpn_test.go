@@ -10,14 +10,14 @@ import (
 )
 
 func TestNewWorkerPoolValidation(t *testing.T) {
-	_, err := wpn.NewWorkerPool(context.Background(), 0)
+	_, err := wpn.NewWorkerPool(0)
 	if err == nil {
 		t.Fatal("expected error for worker count < 1")
 	}
 }
 
 func TestWorkerPoolSubmitNilJobFunc(t *testing.T) {
-	wp, err := wpn.NewWorkerPool(context.Background(), 1)
+	wp, err := wpn.NewWorkerPool(1)
 	if err != nil {
 		t.Fatalf("unexpected NewWorkerPool error: %v", err)
 	}
@@ -28,12 +28,12 @@ func TestWorkerPoolSubmitNilJobFunc(t *testing.T) {
 }
 
 func TestWorkerPoolExecSuccess(t *testing.T) {
-	wp, err := wpn.NewWorkerPool(context.Background(), 2)
+	wp, err := wpn.NewWorkerPool(2)
 	if err != nil {
 		t.Fatalf("unexpected NewWorkerPool error: %v", err)
 	}
 
-	if err := wp.Start(); err != nil {
+	if err := wp.Start(context.Background()); err != nil {
 		t.Fatalf("unexpected Start error: %v", err)
 	}
 	defer wp.Shutdown(context.Background())
@@ -62,12 +62,12 @@ func TestWorkerPoolExecSuccess(t *testing.T) {
 }
 
 func TestWorkerPoolExecFail(t *testing.T) {
-	wp, err := wpn.NewWorkerPool(context.Background(), 1)
+	wp, err := wpn.NewWorkerPool(1)
 	if err != nil {
 		t.Fatalf("unexpected NewWorkerPool error: %v", err)
 	}
 
-	if err := wp.Start(); err != nil {
+	if err := wp.Start(context.Background()); err != nil {
 		t.Fatalf("unexpected Start error: %v", err)
 	}
 	defer wp.Shutdown(context.Background())
@@ -95,12 +95,12 @@ func TestWorkerPoolRetryAttempts(t *testing.T) {
 	wpn.SetRetryAttempts(2)
 	defer wpn.SetRetryAttempts(prevRetryAttempts)
 
-	wp, err := wpn.NewWorkerPool(context.Background(), 1)
+	wp, err := wpn.NewWorkerPool(1)
 	if err != nil {
 		t.Fatalf("unexpected NewWorkerPool error: %v", err)
 	}
 
-	if err := wp.Start(); err != nil {
+	if err := wp.Start(context.Background()); err != nil {
 		t.Fatalf("unexpected Start error: %v", err)
 	}
 	defer wp.Shutdown(context.Background())
@@ -137,12 +137,12 @@ func TestWorkerPoolRetryAttempts(t *testing.T) {
 }
 
 func TestWorkerPoolSubmitAfterShutdown(t *testing.T) {
-	wp, err := wpn.NewWorkerPool(context.Background(), 1)
+	wp, err := wpn.NewWorkerPool(1)
 	if err != nil {
 		t.Fatalf("unexpected NewWorkerPool error: %v", err)
 	}
 
-	if err := wp.Start(); err != nil {
+	if err := wp.Start(context.Background()); err != nil {
 		t.Fatalf("unexpected Start error: %v", err)
 	}
 	wp.Shutdown(context.Background())
