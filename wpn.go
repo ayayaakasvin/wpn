@@ -10,6 +10,10 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+type Sumbitter interface {
+	Submit(JobFunc, context.Context) error
+}
+
 type WorkerPool struct {
 	ctx    context.Context
 	cancel context.CancelFunc
